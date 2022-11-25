@@ -21,3 +21,18 @@ p1 <- steady(p1)
 plotSpectra(p1)
 
 plotYieldVsF(p1, species = 1, F_max = 20)
+
+# reduce knife edge size
+gear_params(p1)$knife_edge_size <- 20
+# yields unstable model at F = 0
+a <- project(p1, effort = 0)
+plotBiomass(a)
+animateSpectra(a)
+# make stable again by increasing sigma
+species_params(p1)$sigma <- 2
+p1 <- steady(p1)
+
+a <- project(p1, effort = 0)
+plotBiomass(a)
+
+plotYieldVsF(p1, species = 1, F_max = 20)
