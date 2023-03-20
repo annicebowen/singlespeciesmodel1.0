@@ -1,0 +1,1778 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+#loading packages 
+library(patchwork)
+library(mizer)
+library(ggplot2)
+library(mizerExperimental)
+library(reshape2)
+library(dplyr)
+```
+
+
+```{r}
+#defining functions 
+#define Balanced Harvesting policy -we will investigate a=0,0.25,0.50,0.75,1
+BalancedHarvest <- function(params, n, effort, e_growth, ...) {
+  usual_f_mort <- colSums(mizerFMortGear(params, effort))
+  production_density <- sweep(e_growth * n^a, 2, params@w^((2*a)-1), "*")
+  production_density * usual_f_mort
+}
+
+#Functions used to evaluate simulations
+#define total yield
+TotalYield <- function(sim) {
+  y <- getYield(sim)
+  y_total <- rowSums(y)
+  return(y_total)
+}
+
+#define total biomass
+TotalBiomass <- function(sim) {
+  b <- getBiomass(sim)
+  b_total <- rowSums(b)
+  return(b_total)
+}
+
+#define total abundance 
+TotalAbundance <- function(sim) { 
+  n <- getN(sim)
+  n_total <- rowSums(n) 
+  return(n_total)
+}
+
+```
+
+
+
+```{r}
+#First we look for the MSSY of each policy on a steady TB model whose system is initially unfished system (X denotes initially unfished)
+
+#setting up TB model with modified reproduction(0.9) and modified sigma(2*1.3=2.6)
+TB <- newTraitParams(no_sp = 12, gear_names = "None", knife_edge_size = NA, min_w_max  = 30, max_w_inf = 40000, reproduction_level = 0.9, sigma = 2.6)
+
+TBst <- projectToSteady(TB)
+TBpr <-project(TB, t_max=100)
+
+#checking everything is as it should be 
+TBPARAMS <- getParams(TBpr)
+getReproductionLevel(TB)
+
+#for later plots 
+TBTotalBiomass <- TotalBiomass(TBpr)
+TBTotalAbundance <-TotalAbundance(TBpr)
+```
+
+
+```{r}
+#find MSSY for size at entry (maturity cutoff) fishing on initally unfished system
+TBXKE <- TBst
+TBXKE@gear_params$knife_edge_size <- TBXKE@species_params$w_mat
+TBXKE@species_params$knife_edge_size <- TBXKE@species_params$w_mat
+gear_params(TBXKE)$gear <- "maturity"
+species_params(TBXKE)$gear <- "maturity"
+
+#defining fishing effort window 
+efforts <- seq(from=26.1, to=26.3 , by=0.05) 
+
+#list to store the results
+total_yieldsXKE <- numeric()
+
+# Looping over initial effort values and running projection
+for (effort in efforts) {
+  TBXKE <- setFishing(TBXKE, initial_effort = effort)
+  TBXKEst <- projectToSteady(TBXKE)
+  TBXKEpr <- project(TBXKE, t_max = 100)
+  total_yieldXKE <- TotalYield(TBXKEpr)[101]
+  total_yieldsXKE <- c(total_yieldsXKE, total_yieldXKE) # storing results 
+}
+
+# Print the total yield values for each run
+print(total_yieldsXKE)
+plot(efforts, total_yieldsXKE)
+
+total_yieldsKE <- data.frame(total_yieldsXKE)
+efforts <-data.frame(efforts)
+MSSY_XKE <- cbind(efforts, total_yieldsXKE)
+#MSSY: c =26.15, Yield=0.02101361
+
+#projection for XKE MSSY:
+TBXKEMSSY <- TBst
+TBXKEMSSY@gear_params$knife_edge_size <-TBXKEMSSY@species_params$w_mat
+TBXKEMSSY@species_params$knife_edge_size <-  TBXKEMSSY@species_params$w_mat
+gear_params(TBXKEMSSY)$gear <- "knife edge"
+species_params(TBXKEMSSY)$gear <- "knife edge"
+TBXKEMSSY<- setFishing(TBXKEMSSY, initial_effort = 26.15) #using c value found as MSSY for KE on unfished system
+TBXKEMSSYst <-projectToSteady(TBXKEMSSY)
+TBXKEMSSYpr <- project(TBXKEMSSYst, t_max=100)
+
+TotalYield((TBXKEMSSYpr))[101] #0.02101365 
+#for later plots
+TBXMSSYTotalBiomassKE <- TotalBiomass((TBXKEMSSYpr))
+TBXMSSYTotalAbundanceKE <-TotalAbundance(TBXKEMSSYpr)
+TBXMSSYTotalYieldKE <- TotalYield((TBXKEMSSYpr))
+```
+
+
+```{r}
+#find MSSY for BH a=0 (productivity)
+a=0
+TBXBH_0<- TBst
+TBXBH_0@gear_params$knife_edge_size <- TBXBH_0@species_params$w_mat
+TBXBH_0@species_params$knife_edge_size <-   TBXBH_0@species_params$w_mat
+gear_params(TBXBH_0)$gear <- "balanced"
+species_params(TBXBH_0)$gear <- "balanced"
+TBXBH_0 <- setRateFunction(TBXBH_0, "FMort", "BalancedHarvest")
+
+efforts <- seq(from= 71, to=72, by=0.2) #71.6
+
+#list to store the results
+total_yieldsX0 <- numeric()
+
+# Looping over initial effort values and running projection
+for (effort in efforts) {
+  TBXBH_0 <- setFishing(TBXBH_0, initial_effort = effort)
+  TBXBH_0st <- projectToSteady(TBXBH_0)
+  TBXBH_0pr <- project(TBXBH_0, t_max = 100)
+  total_yieldX0 <- TotalYield(TBXBH_0pr)[101]
+  total_yieldsX0<- c(total_yieldsX0, total_yieldX0) # storing results 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX0)
+plot(efforts, total_yieldsX0)
+
+total_yieldsX0 <- data.frame(total_yieldsX0)
+efforts <-data.frame(efforts)
+XMSSYBH_0 <- cbind(efforts, total_yieldsX0)
+#MSSY: c=71.6, Yield=0.01914262
+
+#projection for XBH_0 MSSY:
+a=0
+TBXBH_0MSSY<- TBst
+TBXBH_0MSSY@gear_params$knife_edge_size <-TBXBH_0MSSY@species_params$w_mat
+TBXBH_0MSSY@species_params$knife_edge_size <-  TBXBH_0MSSY@species_params$w_mat
+gear_params(TBXBH_0MSSY)$gear <- "balanced"
+species_params(TBXBH_0MSSY)$gear <- "balanced"
+TBXBH_0MSSY <- setRateFunction(TBXBH_0MSSY, "FMort", "BalancedHarvest")
+TBXBH_0MSSY <- setFishing(TBXBH_0MSSY, initial_effort = 71.6) 
+TBXBH_0MSSYst <-projectToSteady(TBXBH_0MSSY)
+TBXBH_0MSSYpr <-project(TBXBH_0MSSY, t_max=100)
+
+TotalYield((TBXBH_0MSSYpr))[101]#0.01914262 
+
+#later MSSY plots 
+TBXMSSYTotalBiomass0 <- TotalBiomass((TBXBH_0MSSYpr))
+TBXMSSYTotalAbundance0 <-TotalAbundance(TBXBH_0MSSYpr)
+TBXMSSYTotalYield0 <- TotalYield((TBXBH_0MSSYpr))
+```
+
+
+
+```{r}
+#find MSSY for BH a=0.25 (intermediate) on intially unfished
+a=0.25
+TBXBH_025<- TBst
+TBXBH_025@gear_params$knife_edge_size <- TBXBH_025@species_params$w_mat
+TBXBH_025@species_params$knife_edge_size <-   TBXBH_025@species_params$w_mat
+gear_params(TBXBH_025)$gear <- "balanced"
+species_params(TBXBH_025)$gear <- "balanced"
+TBXBH_025 <- setRateFunction(TBXBH_025, "FMort", "BalancedHarvest")
+
+efforts <- seq(from=470, to=480, by=2) #474
+
+#list to store the results
+total_yieldsX025 <- numeric()
+
+# Looping over initial effort values and running projection
+for (effort in efforts) {
+  TBXBH_025 <- setFishing(TBXBH_025, initial_effort = effort)
+  TBXBH_025st <- projectToSteady(TBXBH_025)
+  TBXBH_025pr <- project(TBXBH_025, t_max = 100)
+  total_yieldX025 <- TotalYield(TBXBH_025pr)[101]
+  total_yieldsX025 <- c(total_yieldsX025, total_yieldX025) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX025)
+plot(efforts, total_yieldsX025)
+
+total_yieldsX025 <- data.frame(total_yieldsX025)
+efforts <-data.frame(efforts)
+XMSSYBH_025 <- cbind(efforts, total_yieldsX025)
+#MSSY: c=474, Yield=0.01938141
+
+#projection for XBH_025 MSSY:
+a=0.25
+TBXBH_025MSSY<- TBst
+TBXBH_025MSSY@gear_params$knife_edge_size <-TBXBH_025MSSY@species_params$w_mat
+TBXBH_025MSSY@species_params$knife_edge_size <-  TBXBH_025MSSY@species_params$w_mat
+gear_params(TBXBH_025MSSY)$gear <- "balanced"
+species_params(TBXBH_025MSSY)$gear <- "balanced"
+TBXBH_025MSSY <- setRateFunction(TBXBH_025MSSY, "FMort", "BalancedHarvest")
+TBXBH_025MSSY <- setFishing(TBXBH_025MSSY, initial_effort = 474) 
+TBXBH_025MSSYst <-projectToSteady(TBXBH_025MSSY)
+TBXBH_025MSSYpr <-project(TBXBH_025MSSY, t_max=100)
+
+TotalYield((TBXBH_025MSSYpr))[101]#0.01938141 
+
+#later MSSY plots
+TBXMSSYTotalBiomass025 <- TotalBiomass((TBXBH_025MSSYpr))
+TBXMSSYTotalAbundance025 <-TotalAbundance(TBXBH_025MSSYpr)
+TBXMSSYTotalYield025<- TotalYield((TBXBH_025MSSYpr))
+```
+
+```{r}
+#find MSSY for BH a=0.5 (intermediate) on intially unfished
+a=0.50
+TBXBH_05<- TBst
+TBXBH_05@gear_params$knife_edge_size <- TBXBH_05@species_params$w_mat
+TBXBH_05@species_params$knife_edge_size <-   TBXBH_05@species_params$w_mat
+gear_params(TBXBH_05)$gear <- "balanced"
+species_params(TBXBH_05)$gear <- "balanced"
+TBXBH_05 <- setRateFunction(TBXBH_05, "FMort", "BalancedHarvest")
+
+efforts <- seq(from=4250, to=4350, by=10) #4290
+
+total_yieldsX05 <- numeric()
+
+for (effort in efforts) {
+  TBXBH_05 <- setFishing(TBXBH_05, initial_effort = effort)
+  TBXBH_05st<- projectToSteady(TBXBH_05)
+  TBXBH_05pr <- project(TBXBH_05, t_max = 100)
+  total_yieldX05 <- TotalYield(TBXBH_05pr)[101]
+  total_yieldsX05 <- c(total_yieldsX05, total_yieldX05) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX05)
+plot(efforts, total_yieldsX05)
+
+total_yieldsXRpa05 <- data.frame(total_yieldsX05)
+efforts <-data.frame(efforts)
+XMSSYBH_05 <- cbind(efforts, total_yieldsX05)
+#MSSY: c=4290, Yield=0.01954188, 
+
+
+#projection for XBH_05 MSSY:
+a=0.5
+TBXBH_05MSSY<- TBst
+TBXBH_05MSSY@gear_params$knife_edge_size <-TBXBH_05MSSY@species_params$w_mat
+TBXBH_05MSSY@species_params$knife_edge_size <-  TBXBH_05MSSY@species_params$w_mat
+gear_params(TBXBH_05MSSY)$gear <- "balanced"
+species_params(TBXBH_05MSSY)$gear <- "balanced"
+TBXBH_05MSSY <- setRateFunction(TBXBH_05MSSY, "FMort", "BalancedHarvest")
+TBXBH_05MSSY <- setFishing(TBXBH_05MSSY, initial_effort = 4290) 
+TBXBH_05MSSYst <-projectToSteady(TBXBH_05MSSY)
+TBXBH_05MSSYpr <-project(TBXBH_05MSSY, t_max=100)
+
+TotalYield((TBXBH_05MSSYpr))[101] #0.01954188 
+
+#later MSSY plots
+TBXMSSYTotalBiomass05 <- TotalBiomass((TBXBH_05MSSYpr))
+TBXMSSYTotalAbundance05 <-TotalAbundance(TBXBH_05MSSYpr)
+TBXMSSYTotalYield05<- TotalYield((TBXBH_05MSSYpr))
+```
+
+
+```{r}
+#find MSSY for BH a=0.75 (intermediate) on initially unfished
+TBXBH_075<- TBst
+TBXBH_075@gear_params$knife_edge_size <- TBXBH_075@species_params$w_mat
+TBXBH_075@species_params$knife_edge_size <-   TBXBH_075@species_params$w_mat
+gear_params(TBXBH_075)$gear <- "balanced"
+species_params(TBXBH_075)$gear <- "balanced"
+a=0.75
+TBXBH_075 <- setRateFunction(TBXBH_075, "FMort", "BalancedHarvest")
+
+efforts <- seq(from=42300, to=42600, by=100) #42500
+
+total_yieldsX075 <- numeric()
+
+for (effort in efforts) {
+  TBXBH_075 <- setFishing(TBXBH_075, initial_effort = effort)
+  TBXBH_075st <- projectToSteady(TBXBH_075)
+  TBXBH_075pr <- project(TBXBH_075, t_max = 100)
+  total_yieldX075 <- TotalYield(TBXBH_075pr)[101]
+  total_yieldsX075 <- c(total_yieldsX075, total_yieldX075) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX075)
+plot(efforts, total_yieldsX075)
+
+total_yieldsXRpa075 <- data.frame(total_yieldsX075)
+efforts <-data.frame(efforts)
+XMSSYBH_075 <- cbind(efforts, total_yieldsX075)
+#MSSY: c= 42500, Yield=0.01964738
+
+#projection for XBH_075 MSSY:
+a=0.75
+TBXBH_075MSSY<- TBst
+TBXBH_075MSSY@gear_params$knife_edge_size <-TBXBH_075MSSY@species_params$w_mat
+TBXBH_075MSSY@species_params$knife_edge_size <-  TBXBH_075MSSY@species_params$w_mat
+gear_params(TBXBH_075MSSY)$gear <- "balanced"
+species_params(TBXBH_075MSSY)$gear <- "balanced"
+TBXBH_075MSSY <- setRateFunction(TBXBH_075MSSY, "FMort", "BalancedHarvest")
+TBXBH_075MSSY <- setFishing(TBXBH_075MSSY, initial_effort = 42500) 
+TBXBH_075MSSYst <-projectToSteady(TBXBH_075MSSY)
+TBXBH_075MSSYpr <-project(TBXBH_075MSSY, t_max=100)
+
+TotalYield((TBXBH_075MSSYpr))[101]#0.01964738 
+
+#later plots
+TBXMSSYTotalBiomass075 <- TotalBiomass((TBXBH_075MSSYpr))
+TBXMSSYTotalAbundance075 <-TotalAbundance(TBXBH_075MSSYpr)
+TBXMSSYTotalYield075<- TotalYield((TBXBH_075MSSYpr))
+```
+
+
+```{r}
+#find MSSY for BH a=1 ((production) on initially unfished
+a=1
+TBXBH_1<- TBst
+TBXBH_1@gear_params$knife_edge_size <- TBXBH_1@species_params$w_mat
+TBXBH_1@species_params$knife_edge_size <-   TBXBH_1@species_params$w_mat
+gear_params(TBXBH_1)$gear <- "balanced"
+species_params(TBXBH_1)$gear <- "balanced"
+TBXBH_1 <- setRateFunction(TBXBH_1, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from= 440000, to=445000, by=1000) #444000
+
+# Create an empty list to store the results
+total_yieldsX1 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBXBH_1 <- setFishing(TBXBH_1, initial_effort = effort)
+  TBXBH_1st <- projectToSteady(TBXBH_1)
+  TBXBH_1pr <- project(TBXBH_1, t_max = 100)
+  total_yieldX1 <- TotalYield(TBXBH_1pr)[101]
+  total_yieldsX1 <- c(total_yieldsX1, total_yieldX1)  vector
+}
+
+# Print the total yield values for each run
+print(total_yieldsX1)
+plot(efforts, total_yieldsX1)
+
+total_yieldsX1 <- data.frame(total_yieldsX1)
+efforts <-data.frame(efforts)
+XMSSYBH_1 <- cbind(efforts, total_yieldsX1)
+#MSSY: c=44400, yield=0.01971856
+
+#projection for XBH_075 MSSY:
+TBXBH_1MSSY<- TBst
+TBXBH_1MSSY@gear_params$knife_edge_size <-TBXBH_1MSSY@species_params$w_mat
+TBXBH_1MSSY@species_params$knife_edge_size <-  TBXBH_1MSSY@species_params$w_mat
+gear_params(TBXBH_1MSSY)$gear <- "balanced"
+species_params(TBXBH_1MSSY)$gear <- "balanced"
+TBXBH_1MSSY <- setRateFunction(TBXBH_1MSSY, "FMort", "BalancedHarvest")
+TBXBH_1MSSY <- setFishing(TBXBH_1MSSY, initial_effort = 444000) 
+TBXBH_1MSSYst <-projectToSteady(TBXBH_1MSSY)
+TBXBH_1MSSYpr <-project(TBXBH_1MSSY, t_max=100)
+TotalYield((TBXBH_1MSSYpr))[101]#0.01971856 
+
+#later MSSY plots 
+TBXMSSYTotalBiomass1 <- TotalBiomass((TBXBH_1MSSYpr))
+TBXMSSYTotalAbundance1 <-TotalAbundance(TBXBH_1MSSYpr)
+TBXMSSYTotalYield1 <- TotalYield((TBXBH_1MSSYpr))
+```
+
+
+```{r}
+#find MSSY for BH a=0 ((productivity) with initial state steady KE fishing 
+a=0
+TBBH_0<- TBXKEMSSYst 
+TBBH_0@gear_params$knife_edge_size <- TBBH_0@species_params$w_mat
+TBBH_0@species_params$knife_edge_size <-   TBBH_0@species_params$w_mat
+gear_params(TBBH_0)$gear <- "balanced"
+species_params(TBBH_0)$gear <- "balanced"
+TBBH_0 <- setRateFunction(TBBH_0, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=71,to=72, by=0.1) 
+
+# Create an empty list to store the results
+total_yields0 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBBH_0 <- setFishing(TBBH_0, initial_effort = effort)
+  TBBH_0st <- projectToSteady(TBBH_0)
+  TBBH_0pr <- project(TBBH_0, t_max = 100)
+  total_yield0 <- TotalYield(TBBH_0pr)[101]
+  total_yields0 <- c(total_yields0, total_yield0)  
+}
+
+# Print the total yield values for each run
+print(total_yields0)
+plot(efforts, total_yields0)
+
+total_yields0 <- data.frame(total_yields0)
+efforts <-data.frame(efforts)
+MSSYBH_0 <- cbind(efforts, total_yields0)
+#MSSY: c=71.5, Yield=0.01914262 -same Yield & c as unfished
+
+#projection for BH_0 MSSY:
+a=0
+TBBH_0MSSY<- TBXKEMSSYst
+TBBH_0MSSY@gear_params$knife_edge_size <-TBBH_0MSSY@species_params$w_mat
+TBBH_0MSSY@species_params$knife_edge_size <-  TBBH_0MSSY@species_params$w_mat
+gear_params(TBBH_0MSSY)$gear <- "balanced"
+species_params(TBBH_0MSSY)$gear <- "balanced"
+TBBH_0MSSY <- setRateFunction(TBBH_0MSSY, "FMort", "BalancedHarvest")
+TBBH_0MSSY <- setFishing(TBBH_0MSSY, initial_effort = 71.5) 
+TBBH_0MSSYst <-projectToSteady(TBBH_0MSSY)
+TBBH_0MSSYpr <-project(TBBH_0MSSY, t_max=100)
+
+TotalYield((TBBH_0MSSYpr))[101]#0.01914262 
+
+#later MSSY plots 
+TBMSSYTotalBiomass0 <- TotalBiomass((TBBH_0MSSYpr))
+TBMSSYTotalAbundance0 <-TotalAbundance(TBBH_0MSSYpr)
+TBMSSYTotalYield0 <- TotalYield((TBBH_0MSSYpr))
+```
+
+```{r}
+#find MSSY for BH a=0.25 (intermediate) with initial state steady KE fishing 
+a=0.25
+TBBH_025<- TBXKEMSSY 
+TBBH_025@gear_params$knife_edge_size <- TBBH_025@species_params$w_mat
+TBBH_025@species_params$knife_edge_size <-   TBBH_025@species_params$w_mat
+gear_params(TBBH_025)$gear <- "balanced"
+species_params(TBBH_025)$gear <- "balanced"
+TBBH_025 <- setRateFunction(TBBH_025, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=465, to=475, by=1) 
+
+# Create an empty list to store the results
+total_yields025 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBBH_025 <- setFishing(TBBH_025, initial_effort = effort)
+  TBBH_025st <- projectToSteady(TBBH_025)
+  TBBH_025pr <- project(TBBH_025, t_max = 100)
+  total_yield025 <- TotalYield(TBBH_025pr)[101]
+  total_yields025 <- c(total_yields025, total_yield025) 
+}
+
+# Print the total yield values for each run
+print(total_yields025)
+plot(efforts, total_yields025)
+
+total_yields025 <- data.frame(total_yields025)
+efforts <-data.frame(efforts)
+MSSYBH_025 <- cbind(efforts, total_yields025)
+#MSSY:c=474, Yield= 0.01938141
+
+#projection for BH_025 MSSY:
+a=0.25
+TBBH_025MSSY<- TBXKEMSSYst
+TBBH_025MSSY@gear_params$knife_edge_size <-TBBH_025MSSY@species_params$w_mat
+TBBH_025MSSY@species_params$knife_edge_size <-  TBBH_025MSSY@species_params$w_mat
+gear_params(TBBH_025MSSY)$gear <- "balanced"
+species_params(TBBH_025MSSY)$gear <- "balanced"
+TBBH_025MSSY <- setRateFunction(TBBH_025MSSY, "FMort", "BalancedHarvest")
+TBBH_025MSSY <- setFishing(TBBH_025MSSY, initial_effort = 474) 
+TBBH_025MSSYst <-projectToSteady(TBBH_025MSSY)
+TBBH_025MSSYpr <-project(TBBH_025MSSY, t_max=100)
+
+TotalYield((TBBH_025MSSYpr))[101] #0.01938142 
+
+#later MSSY plots
+TBMSSYTotalBiomass025 <- TotalBiomass((TBBH_025MSSYpr))
+TBMSSYTotalAbundance025 <-TotalAbundance(TBBH_025MSSYpr)
+TBMSSYTotalYield025<- TotalYield((TBBH_025MSSYpr))
+```
+
+
+
+```{r}
+#find MSSY for BH a=0.5 (intermediate) with initial state steady KE fishing 
+a=0.50
+TBBH_05<- TBXKEMSSYst
+TBBH_05@gear_params$knife_edge_size <- TBBH_05@species_params$w_mat
+TBBH_05@species_params$knife_edge_size <-   TBBH_05@species_params$w_mat
+gear_params(TBBH_05)$gear <- "balanced"
+species_params(TBBH_05)$gear <- "balanced"
+TBBH_05 <- setRateFunction(TBBH_05, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=4250, to=4350, by=10) #4290
+
+# Create an empty list to store the results
+total_yields05 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBBH_05 <- setFishing(TBBH_05, initial_effort = effort)
+  TBBH_05st <- projectToSteady(TBBH_05)
+  TBBH_05pr <- project(TBBH_05, t_max = 100)
+  total_yield05 <- TotalYield(TBBH_05pr)[101]
+  total_yields05 <- c(total_yields05, total_yield05) 
+}
+
+# Print the total yield values for each run
+print(total_yields05)
+plot(efforts, total_yields05)
+
+total_yields05 <- data.frame(total_yields05)
+efforts <-data.frame(efforts)
+MSSYBH_05 <- cbind(efforts, total_yields05)
+#MSSY: c=4290, Yield= 0.01954189, same yield as unfished   
+
+#Projection for a=0.5 MSSY
+a=0.5
+TBBH_05MSSY<- TBXKEMSSYst
+TBBH_05MSSY@gear_params$knife_edge_size <-TBBH_05MSSY@species_params$w_mat
+TBBH_05MSSY@species_params$knife_edge_size <-  TBBH_05MSSY@species_params$w_mat
+gear_params(TBBH_05MSSY)$gear <- "balanced"
+species_params(TBBH_05MSSY)$gear <- "balanced"
+TBBH_05MSSY <- setRateFunction(TBBH_05MSSY, "FMort", "BalancedHarvest")
+TBBH_05MSSY <- setFishing(TBBH_05MSSY, initial_effort = 4290) 
+TBBH_05MSSYst <-projectToSteady(TBBH_05MSSY)
+TBBH_05MSSYpr <-project(TBBH_05MSSY, t_max=100)
+
+TotalYield((TBBH_05MSSYpr))[101]#0.01954189 
+
+#later MSSY plots
+TBMSSYTotalBiomass05 <- TotalBiomass((TBBH_05MSSYpr))
+TBMSSYTotalAbundance05 <-TotalAbundance(TBBH_05MSSYpr)
+TBMSSYTotalYield05<- TotalYield((TBBH_05MSSYpr))
+```
+
+
+
+```{r}
+#find MSSY for BH a=0 (intermediate) with initial state steady KE fishing 
+a=0.75
+TBBH_075<- TBXKEMSSYst
+TBBH_075@gear_params$knife_edge_size <- TBBH_075@species_params$w_mat
+TBBH_075@species_params$knife_edge_size <-   TBBH_075@species_params$w_mat
+gear_params(TBBH_075)$gear <- "balanced"
+species_params(TBBH_075)$gear <- "balanced"
+TBBH_075 <- setRateFunction(TBBH_075, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=42450, to=42550, by=10) #425000
+
+# Create an empty list to store the results
+total_yields075 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBBH_075 <- setFishing(TBBH_075, initial_effort = effort)
+  TBBH_075st <- projectToSteady(TBBH_075)
+  TBBH_075pr <- project(TBBH_075, t_max = 100)
+  total_yield075 <- TotalYield(TBBH_075pr)[101]
+  total_yields075 <- c(total_yields075, total_yield075) 
+}
+
+# Print the total yield values for each run
+print(total_yields075)
+plot(efforts, total_yields075)
+
+total_yields075 <- data.frame(total_yields075)
+efforts <-data.frame(efforts)
+MSSYBH_075 <- cbind(efforts, total_yields075)
+#MSSY: c=42530, Yield=0.01964738, same yield as unfished 
+
+#Projection for a=0.75 MSSY
+a=0.75
+TBBH_075MSSY<- TBXKEMSSYst
+TBBH_075MSSY@gear_params$knife_edge_size <-TBBH_075MSSY@species_params$w_mat
+TBBH_075MSSY@species_params$knife_edge_size <-  TBBH_075MSSY@species_params$w_mat
+gear_params(TBBH_075MSSY)$gear <- "balanced"
+species_params(TBBH_075MSSY)$gear <- "balanced"
+TBBH_075MSSY <- setRateFunction(TBBH_075MSSY, "FMort", "BalancedHarvest")
+TBBH_075MSSY <- setFishing(TBBH_075MSSY, initial_effort = 42530) 
+TBBH_075MSSYpr <-project(TBBH_075MSSY, t_max=100)
+TotalYield((TBBH_075MSSYpr))[101] #0.01964738 
+
+#later plots
+TBMSSYTotalBiomass075 <- TotalBiomass((TBBH_075MSSYpr))
+TBMSSYTotalAbundance075 <-TotalAbundance(TBBH_075MSSYpr)
+TBMSSYTotalYield075<- TotalYield((TBBH_075MSSYpr))
+```
+
+```{r}
+#find MSSY for BH a=1 ((productivity) with initial state steady KE fishing 
+a=1
+TBBH_1<- TBXKEMSSYst
+TBBH_1@gear_params$knife_edge_size <- TBBH_1@species_params$w_mat
+TBBH_1@species_params$knife_edge_size <-   TBBH_1@species_params$w_mat
+gear_params(TBBH_1)$gear <- "balanced"
+species_params(TBBH_1)$gear <- "balanced"
+TBBH_1 <- setRateFunction(TBBH_1, "FMort", "BalancedHarvest")
+
+efforts <- seq(from= 442000, to=446000, by=1000) 
+
+# Create an empty list to store the results
+total_yields1 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  TBBH_1 <- setFishing(TBBH_1, initial_effort = effort)
+  TBBH_1st <- projectToSteady(TBBH_1)
+  TBBH_1pr <- project(TBBH_1, t_max = 100)
+  total_yield1 <- TotalYield(TBBH_1pr)[101]
+  total_yields1 <- c(total_yields1, total_yield1) 
+}
+
+# Print the total yield values for each run
+print(total_yields1)
+plot(efforts, total_yields1)
+
+total_yields1 <- data.frame(total_yields1)
+efforts <-data.frame(efforts)
+MSSYBH_1 <- cbind(efforts, total_yields1)
+#MSSY: c=44400, Yield=0.01971856, same yield and c as unfished 
+
+#projection for BH_1 MSSY:
+TBBH_1MSSY<- TBXKEMSSYst
+TBBH_1MSSY@gear_params$knife_edge_size <-TBBH_1MSSY@species_params$w_mat
+TBBH_1MSSY@species_params$knife_edge_size <-  TBBH_1MSSY@species_params$w_mat
+gear_params(TBBH_1MSSY)$gear <- "balanced"
+species_params(TBBH_1MSSY)$gear <- "balanced"
+TBBH_1MSSY <- setRateFunction(TBBH_1MSSY, "FMort", "BalancedHarvest")
+TBBH_1MSSY <- setFishing(TBBH_1MSSY, initial_effort = 442500) 
+TBBH_1MSSYst <-projectToSteady(TBBH_1MSSY)
+TBBH_1MSSYpr <-project(TBBH_1MSSY, t_max=100)
+TotalYield((TBBH_1MSSYpr))[101]#0.01971856 
+
+#later MSSY plots 
+TBMSSYTotalBiomass1 <- TotalBiomass((TBBH_1MSSYpr))
+TBMSSYTotalAbundance1 <-TotalAbundance(TBBH_1MSSYpr)
+TBMSSYTotalYield1 <- TotalYield((TBBH_1MSSYpr))
+```
+
+```{r}
+#For MSSY yield plots i will produce a stacked bar chart at t=100, coloured by species summing to the total yield, y axis=yield, xaxis=a
+#Comparing Yield Dynamics KE fished system Vs non fished system
+#Unfished 
+matplot(cbind(TBXMSSYTotalYieldKE, TBXMSSYTotalYield0, TBXMSSYTotalYield025, TBXMSSYTotalYield05, TBXMSSYTotalYield075, TBXMSSYTotalYield1),
+log = "xy", type = "l", main = "Total MSSY",
+xlab = "Year", ylab = "Yield",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('KE', 'a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=4, cex=1) 
+
+#KE fished
+matplot(cbind(TBMSSYTotalYieldKE, TBMSSYTotalYield0, TBMSSYTotalYield025, TBMSSYTotalYield05, TBMSSYTotalYield075, TBMSSYTotalYield1),
+log = "xy", type = "l", main = "Total MSSY",
+xlab = "Year", ylab = "Yield",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('KE', 'a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=1)
+
+```
+
+
+
+
+```{r}
+#Comparing Biomasss Dynamics KE fished system Vs non fished system
+
+#unfished
+matplot(cbind(TBTotalBiomass, TBXMSSYTotalBiomassKE, TBXMSSYTotalBiomass0, TBXMSSYTotalBiomass025, TBXMSSYTotalBiomass05, TBXMSSYTotalBiomass075, TBXMSSYTotalBiomass1),
+log = "xy", type = "l", main = "MSSY Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1",  col = c(8,1,7,3,4,5,2), lty=c(2,4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomright',legend = c('unfished','KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(8,1,7,3,4,5,2), lty=c(2,4,1,2,2,2,1), lwd=3, cex=1) 
+
+#previously fished KE
+matplot(cbind(TBMSSYTotalBiomassKE, TBMSSYTotalBiomass0, TBMSSYTotalBiomass025, TBMSSYTotalBiomass05, TBMSSYTotalBiomass075, TBMSSYTotalBiomass1),
+log = "xy", type = "l", main = "MSSY Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=1)
+```
+
+```{r}
+#for MSSY total abundance and biomass plots i will do a barchart to show just the final step for each policy 
+#Comparing Abundance Dynamics KE fished system Vs non fished system
+
+#unfished
+matplot(cbind(TBTotalAbundance, TBXMSSYTotalAbundanceKE, TBXMSSYTotalAbundance0, TBXMSSYTotalAbundance025, TBXMSSYTotalAbundance05, TBXMSSYTotalAbundance075, TBXMSSYTotalAbundance1),
+log = "xy", type = "l", main = "MSSY Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(8,1,7,3,4,5,2), lty=c(2,4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomleft',legend = c('unfished','KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(8,1,7,3,4,5,2), lty=c(2,4,1,2,2,2,1), lwd=3, cex=0.68)
+
+#KE fishing 
+matplot(cbind(TBMSSYTotalAbundanceKE, TBMSSYTotalAbundance0, TBMSSYTotalAbundance025, TBMSSYTotalAbundance05, TBMSSYTotalAbundance075, TBMSSYTotalAbundance1),
+log = "xy", type = "l", main = "MSSY Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=0.75)
+
+```
+
+
+```{r}
+#Now we are analysing fishing efforts which result in the same yield regardless of policy to compare policies rather than system initial conditions in a TB model
+#we compare policies after KE fishing as this is the most realistic
+#finding the initial state for all other policies 
+TB01KE<- TBst
+TB01KE@gear_params$knife_edge_size <-TB01KE@species_params$w_mat
+TB01KE@species_params$knife_edge_size <-  TB01KE@species_params$w_mat
+gear_params(TB01KE)$gear <- "knife edge"
+species_params(TB01KE)$gear <- "knife edge"
+TB01KE<- setFishing(TB01KE, initial_effort = 1.071072) #0.01 
+TB01KEst <-projectToSteady(TB01KE) #22.5 years
+TB01KEpr <-project(TB01KEst, t_max=100)
+TotalYield(TB01KEpr)[101] 
+
+#for later plots
+TB01TotalBiomassKE <- TotalBiomass((TB01KEpr))
+TB01TotalAbundanceKE <-TotalAbundance(TB01KEpr)
+TB01TotalYieldKE <- TotalYield((TB01KEpr))
+
+#SSB
+TB01ssbKE <- melt(getSSB(TB01KEpr))
+```
+
+```{r}
+#projection for a=0 (production)
+a=0
+TB01BH_0<- TB01KEst
+TB01BH_0@gear_params$knife_edge_size <- TB01BH_0@species_params$w_mat
+TB01BH_0@species_params$knife_edge_size <-   TB01BH_0@species_params$w_mat
+gear_params(TB01BH_0)$gear <- "balanced"
+species_params(TB01BH_0)$gear <- "balanced"
+TB01BH_0 <- setRateFunction(TB01BH_0, "FMort", "BalancedHarvest")
+TB01BH_0 <- setFishing(TB01BH_0, initial_effort = 3.07113) 
+TB01BH_0st <-projectToSteady(TB01BH_0)
+TB01BH_0pr <- project(TB01BH_0, t_max=100)
+
+TotalYield(TB01BH_0pr)[101] #0.01000001
+
+#later plots 
+TB01TotalYield0 <- TotalYield((TB01BH_0pr ))
+TB01TotalBiomass0 <- TotalBiomass((TB01BH_0pr ))
+TB01TotalAbundance0 <-TotalAbundance(TB01BH_0pr )
+
+#SSB
+TB01ssb0 <- melt(getSSB(TB01BH_0pr))
+```
+
+
+
+```{r}
+#projection for a=0.25 (intermediate)
+a<-0.25
+TB01BH_025<- TB01KEst
+TB01BH_025@gear_params$knife_edge_size <- TB01BH_025@species_params$w_mat
+TB01BH_025@species_params$knife_edge_size <-   TB01BH_025@species_params$w_mat
+gear_params(TB01BH_025)$gear <- "balanced"
+species_params(TB01BH_025)$gear <- "balanced"
+TB01BH_025 <- setRateFunction(TB01BH_025, "FMort", "BalancedHarvest")
+TB01BH_025 <- setFishing(TB01BH_025, initial_effort = 16.872) 
+TB01BH_025st <-projectToSteady(TB01BH_025)
+TB01BH_025pr <- project(TB01BH_025, t_max=100)
+
+TotalYield(TB01BH_025pr)[101] #0.0100001
+
+#later plots 
+TB01TotalYield025 <- TotalYield((TB01BH_025pr))
+TB01TotalBiomass025 <- TotalBiomass((TB01BH_025pr))
+TB01TotalAbundance025 <-TotalAbundance(TB01BH_025pr)
+
+#SSB
+TB01ssb025 <- melt(getSSB(TB01BH_025pr))
+
+#plotBiomassRelative(TB01BH_Rpa025pr, TB01KEpr)
+```
+
+```{r}
+#projection for a=0.5 (intermediate)
+a<-0.5
+TB01BH_05<- TB01KEst
+TB01BH_05@gear_params$knife_edge_size <- TB01BH_05@species_params$w_mat
+TB01BH_05@species_params$knife_edge_size <-   TB01BH_05@species_params$w_mat
+gear_params(TB01BH_05)$gear <- "balanced"
+species_params(TB01BH_05)$gear <- "balanced"
+TB01BH_05 <- setRateFunction(TB01BH_05, "FMort", "BalancedHarvest")
+TB01BH_05 <- setFishing(TB01BH_05, initial_effort = 92.781) 
+TB01BH_05st <-projectToSteady(TB01BH_05)
+TB01BH_05pr <- project(TB01BH_05, t_max=100)
+
+TotalYield(TB01BH_05pr)[101] #0.01000047 
+
+
+#later plots 
+TB01TotalYield05 <- TotalYield((TB01BH_05pr))
+TB01TotalBiomass05 <- TotalBiomass((TB01BH_05pr))
+TB01TotalAbundance05 <-TotalAbundance(TB01BH_05pr)
+
+#SSB
+TB01ssb05 <- melt(getSSB(TB01BH_05pr))
+#plotBiomassRelative(TB01BH_Rpa05pr, TB01KEpr)
+```
+
+```{r}
+#projection for a=0.75 (intermediate)
+a<-0.75
+TB01BH_075<- TB01KEst
+TB01BH_075@gear_params$knife_edge_size <- TB01BH_075@species_params$w_mat
+TB01BH_075@species_params$knife_edge_size <-   TB01BH_075@species_params$w_mat
+gear_params(TB01BH_075)$gear <- "balanced"
+species_params(TB01BH_075)$gear <- "balanced"
+TB01BH_075 <- setRateFunction(TB01BH_075, "FMort", "BalancedHarvest")
+TB01BH_075 <- setFishing(TB01BH_075, initial_effort = 510.7) 
+TB01BH_075st <-projectToSteady(TB01BH_075)
+TB01BH_075pr <- project(TB01BH_075, t_max=100)
+
+TotalYield(TB01BH_075pr)[101] #0.01000023 
+
+#later plots 
+TB01TotalYield075 <- TotalYield((TB01BH_075pr))
+TB01TotalBiomass075 <- TotalBiomass((TB01BH_075pr))
+TB01TotalAbundance075 <-TotalAbundance(TB01BH_075pr)
+
+#SSB
+TB01ssb075 <- melt(getSSB(TB01BH_075pr))
+```
+
+
+```{r}
+#projection for a=1 (production)
+a=1
+TB01BH_1<- TB01KEst
+TB01BH_1@gear_params$knife_edge_size <- TB01BH_1@species_params$w_mat
+TB01BH_1@species_params$knife_edge_size <-   TB01BH_1@species_params$w_mat
+gear_params(TB01BH_1)$gear <- "balanced"
+species_params(TB01BH_1)$gear <- "balanced"
+TB01BH_1 <- setRateFunction(TB01BH_1, "FMort", "BalancedHarvest")
+TB01BH_1 <- setFishing(TB01BH_1, initial_effort = 2814.2125) 
+TB01BH_1st <-projectToSteady(TB01BH_1)
+TB01BH_1pr <- project(TB01BH_1, t_max=100)
+
+TotalYield(TB01BH_1pr)[101] #0.01000001
+
+plotBiomassRelative(TB01BH_1pr, TB01KEpr)
+#later plots 
+TB01TotalYield1 <- TotalYield((TB01BH_1pr ))
+TB01TotalBiomass1 <- TotalBiomass((TB01BH_1pr ))
+TB01TotalAbundance1 <-TotalAbundance(TB01BH_1pr )
+
+#SSB
+TB01ssb1 <- melt(getSSB(TB01BH_1pr))
+```
+
+```{r}
+matplot(cbind(TB01TotalYieldKE, TB01TotalYield0, TB01TotalYield025, TB01TotalYield05, TB01TotalYield075, TB01TotalYield1),
+log = "xy", type = "l", main = "Total Yield",
+xlab = "Year", ylab = "Yield", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('KE', 'a=1','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=1)
+```
+
+```{r}
+#biomass plot
+matplot(cbind(TB01TotalBiomassKE, TB01TotalBiomass0, TB01TotalBiomass025, TB01TotalBiomass05, TB01TotalBiomass075, TB01TotalBiomass1),
+log = "xy", type = "l", main = "Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=0.68)
+```
+
+```{r}
+matplot(cbind(TB01TotalAbundanceKE, TB01TotalAbundance0, TB01TotalAbundance025, TB01TotalAbundance05, TB01TotalAbundance075, TB01TotalAbundance1),
+log = "xy", type = "l", main = "Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='t1opright',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=1)
+```
+
+```{r}
+#relative spectra plots a=0 & a=1
+plotSpectraRelative(TB01KEpr,TB01BH_0pr)
+plotSpectraRelative(TB01KEpr,TB01BH_1pr)
+```
+
+
+```{r}
+#SSB PLOT TB01
+#sorting data a=0
+SSBstandard0 <- merge(TB01ssbKE[,c('time', 'sp','value')], TB01ssb0[,c('time', 'sp','value')], by =c('sp', 'time'))
+SSBstandard0$difference <- ((SSBstandard0$value.y - SSBstandard0$value.x)/SSBstandard0$value.x)*100
+SSBstandard0<- subset(SSBstandard0, select= -c(value.x, value.y))
+
+#sorting data a=1
+SSBstandard1 <- merge(TB01ssbKE[,c('time', 'sp','value')], TB01ssb1[,c('time', 'sp','value')], by =c('sp', 'time'))
+SSBstandard1$difference <- ((SSBstandard1$value.y - SSBstandard1$value.x)/SSBstandard1$value.x)*100
+SSBstandard1 <- subset(SSBstandard1, select= -c(value.x, value.y))
+
+#sorting data a=0.25
+SSBstandard025 <- merge(TB01ssbKE[,c('time', 'sp','value')], TB01ssb025[,c('time', 'sp','value')], by =c('sp', 'time'))
+SSBstandard025$difference <- ((SSBstandard025$value.y - SSBstandard025$value.x)/SSBstandard025$value.x)*100
+SSBstandard025 <- subset(SSBstandard025, select= -c(value.x, value.y))
+
+#sorting data a=0.5
+SSBstandard05 <- merge(TB01ssbKE[,c('time', 'sp','value')], TB01ssb05[,c('time', 'sp','value')], by =c('sp', 'time'))
+SSBstandard05$difference <- ((SSBstandard05$value.y - SSBstandard05$value.x)/SSBstandard05$value.x)*100
+SSBstandard05 <- subset(SSBstandard05, select= -c(value.x, value.y))
+
+#sorting data a=0.75
+SSBstandard075 <- merge(TB01ssbKE[,c('time', 'sp','value')], TB01ssb075[,c('time', 'sp','value')], by =c('sp', 'time'))
+SSBstandard075$difference <- ((SSBstandard075$value.y - SSBstandard075$value.x)/SSBstandard075$value.x)*100
+SSBstandard075 <- subset(SSBstandard075, select= -c(value.x, value.y))
+
+TBSSB.df <- rbind(cbind(SSBstandard0, scenario = 'a=0'), cbind(SSBstandard025, scenario = 'a=0.25'), cbind(SSBstandard05, scenario = 'a=0.50'), cbind(SSBstandard075, scenario = 'a=0.75'),   cbind(SSBstandard1, scenario= 'a=1'))
+
+
+colours <-c('a=1'='red', 'a=0.25'='green', 'a=0.50'='#7fcdbb', 'a=0.75'='blue', 'a=0'='orange')
+
+ggplot(data = TBSSB.df, aes(x = time, y = difference, color = scenario)) +
+     geom_line() +
+     facet_wrap(~ sp, scales = "free_y") + scale_color_manual(values = colours) + geom_hline(yintercept = 0, linetype="dashed") +ylab(' SSB Difference %')
+```
+
+
+```{r}
+#All analysis after this point is on the North Sea model 
+#setting up the model 
+NS <- NS_params
+gear_params(NS)$gear <- "None"
+species_params(NS)$gear <- "None"
+NSst <- projectToSteady(NS, effort = 0)
+NSpr <- project(NSst, t_max=100)
+
+NSTotalAbundance <-TotalAbundance(NSpr)
+NSTotalBiomass<- TotalBiomass((NSpr))
+```
+
+
+```{r}
+#First we look for the MSSY of each policy on a steady NS model whose system is initially unfished system (X denotes initially unfished)
+
+#maturity Knife edge cut off 
+NSXKE <- NSst
+gear_params(NSXKE)$gear <- "balanced"
+species_params(NSXKE)$gear <- "balanced"
+gear_params(NSXKE)$knife_edge_size <- NSXKE@species_params$w_mat
+species_params(NSXKE)$knife_edge_size <- NSXKE@species_params$w_mat
+
+#Testing efforts for BH_pb
+efforts <- seq(from=1.27, to=1.28 , by=0.01) #won't converge >1.27
+
+# Create an empty list to store the results
+total_yieldsXKE <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXKEst <- projectToSteady(NSXKE, effort=effort)
+  NSXKEpr <- project(NSXKEst, effort=effort, t_max = 100)
+  total_yieldXKE <- TotalYield(NSXKEpr)[101]
+  total_yieldsXKE <- c(total_yieldsXKE, total_yieldXKE) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsXKE)
+plot(efforts, total_yieldsXKE)
+
+total_yieldsXKE <- data.frame(total_yieldsXKE)
+efforts <-data.frame(efforts)
+XNSMSSY_KE <- cbind(efforts, total_yieldsXKE)
+#MSSY: c=1.27, yield=2.875588e+12
+
+#projection for KE xMSSY
+NSXMSSYKE <- NSst
+gear_params(NSXMSSYKE)$gear <- "knife edge"
+species_params(NSXMSSYKE)$gear <- "knife edge"
+gear_params(NSXMSSYKE)$knife_edge_size <- species_params(NSXMSSYKE)$w_mat
+species_params(NSXMSSYKE)$knife_edge_size <- species_params(NSXMSSYKE)$w_mat
+NSXMSSYKEst <- projectToSteady(NSXMSSYKE, effort=1.27, t_max=100)
+NSXMSSYKEpr <- project(NSXMSSYKEst, effort=1.27)
+NSXMSSYTotalYieldKE <- TotalYield(NSXMSSYKEpr) 
+NSXMSSYTotalBiomassKE <-TotalBiomass(NSXMSSYKEpr)
+NSXMSSYTotalAbundanceKE <- TotalAbundance(NSXMSSYKEpr)
+TotalYield(NSXMSSYKEpr)[101] #2.875588e+12
+```
+
+```{r}
+#finding MSSY for a=0 on an initially unfished system 
+a=0
+NSXBH_0<- NSst
+gear_params(NSXBH_0)$gear <- "balanced"
+species_params(NSXBH_0)$gear <- "balanced"
+gear_params(NSXBH_0)$knife_edge_size <- NSXBH_0@species_params$w_mat
+species_params(NSXBH_0)$knife_edge_size <- NSXBH_0@species_params$w_mat
+NSXBH_0 <- setRateFunction(NSXBH_0, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=3.9,to=4, by=0.1) #>3.9
+
+# Create an empty list to store the results
+total_yieldsX0 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXBH_0 <- setFishing(NSXBH_0, initial_effort =effort)
+  NSXBH_0st <- projectToSteady(NSXBH_0)
+  NSXBH_0pr <- project(NSXBH_0, t_max = 100)
+  total_yieldX0 <- TotalYield(NSXBH_0pr)[101]
+  total_yieldsX0 <- c(total_yieldsX0, total_yieldX0) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX0)
+plot(efforts, total_yieldsX0)
+
+total_yieldsX0 <- data.frame(total_yieldsX0)
+efforts <-data.frame(efforts)
+XNSMSSY_0 <- cbind(efforts, total_yieldsX0)
+#MSSY: c=3.9, yield=2.916919e+12
+
+#projection for a=0 xMSSY
+a=0
+NSXBH_0MSSY<- NSst
+NSXBH_0MSSY@gear_params$knife_edge_size <-NSXBH_0MSSY@species_params$w_mat
+NSXBH_0MSSY@species_params$knife_edge_size <-  NSXBH_0MSSY@species_params$w_mat
+gear_params(NSXBH_0MSSY)$gear <- "balanced"
+species_params(NSXBH_0MSSY)$gear <- "balanced"
+NSXBH_0MSSY <- setRateFunction(NSXBH_0MSSY, "FMort", "BalancedHarvest")
+NSXBH_0MSSY <- setFishing(NSXBH_0MSSY, initial_effort = 3.9) 
+NSXBH_0MSSYst <-projectToSteady(NSXBH_0MSSY)
+NSXBH_0MSSYpr <-project(NSXBH_0MSSY, t_max=100)
+
+TotalYield((NSXBH_0MSSYpr))[101] #2.916919e+12
+
+#later MSSY plots 
+NSXMSSYTotalBiomass0 <- TotalBiomass((NSXBH_0MSSYpr))
+NSXMSSYTotalAbundance0 <-TotalAbundance(NSXBH_0MSSYpr)
+NSXMSSYTotalYield0 <- TotalYield((NSXBH_0MSSYpr))
+```
+
+```{r}
+#finding MSSY for a=0.25 on an initially unfished system 
+a=0.25
+NSXBH_025<- NSst
+gear_params(NSXBH_025)$gear <- "balanced"
+species_params(NSXBH_025)$gear <- "balanced"
+gear_params(NSXBH_025)$knife_edge_size <- NSXBH_025@species_params$w_mat
+species_params(NSXBH_025)$knife_edge_size <- NSXBH_025@species_params$w_mat
+NSXBH_025 <- setRateFunction(NSXBH_025, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=0.4,to=0.5, by=0.1) #>0.4 doesn't converge --> 4.508873e+12 
+
+# Create an empty list to store the results
+total_yieldsX025 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXBH_025 <- setFishing(NSXBH_025, initial_effort =effort)
+  NSXBH_025st <- projectToSteady(NSXBH_025)
+  NSXBH_025pr <- project(NSXBH_025, t_max = 100)
+  total_yieldX025 <- TotalYield(NSXBH_025pr)[101]
+  total_yieldsX025 <- c(total_yieldsX025, total_yieldX025) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX025)
+plot(efforts, total_yieldsX025)
+
+total_yieldsX025 <- data.frame(total_yieldsX025)
+efforts <-data.frame(efforts)
+XNSMSSY_025 <- cbind(efforts, total_yieldsX025)
+#MSSY: c=0.4, yield=4.508873e+12
+
+#projection for unfished MSSY
+a=0.25
+NSXBH_025MSSY<- NSst
+NSXBH_025MSSY@gear_params$knife_edge_size <-NSXBH_025MSSY@species_params$w_mat
+NSXBH_025MSSY@species_params$knife_edge_size <-  NSXBH_025MSSY@species_params$w_mat
+gear_params(NSXBH_025MSSY)$gear <- "balanced"
+species_params(NSXBH_025MSSY)$gear <- "balanced"
+NSXBH_025MSSY <- setRateFunction(NSXBH_025MSSY, "FMort", "BalancedHarvest")
+NSXBH_025MSSY <- setFishing(NSXBH_025MSSY, initial_effort = 0.4) 
+NSXBH_025MSSYst <-projectToSteady(NSXBH_025MSSY)
+NSXBH_025MSSYpr <-project(NSXBH_025MSSY, t_max=100)
+
+TotalYield((NSXBH_025MSSYpr))[101]#4.508873e+12 
+
+#later MSSY plots
+NSXMSSYTotalBiomass025 <- TotalBiomass((NSXBH_025MSSYpr))
+NSXMSSYTotalAbundance025 <-TotalAbundance(NSXBH_025MSSYpr)
+NSXMSSYTotalYield025<- TotalYield((NSXBH_025MSSYpr))
+```
+
+```{r}
+#finding MSSY for a=0.5 on an initially unfished system 
+a=0.5
+NSXBH_05<- NSst
+gear_params(NSXBH_05)$gear <- "balanced"
+species_params(NSXBH_05)$gear <- "balanced"
+gear_params(NSXBH_05)$knife_edge_size <- NSXBH_05@species_params$w_mat
+species_params(NSXBH_05)$knife_edge_size <- NSXBH_05@species_params$w_mat
+NSXBH_05 <- setRateFunction(NSXBH_05, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=29e-3,to=30e-3, by=1e-3) #> 29 doesn't converge 
+
+# Create an empty list to store the results
+total_yieldsX05 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXBH_05 <- setFishing(NSXBH_05, initial_effort =effort)
+  NSXBH_05st <- projectToSteady(NSXBH_05)
+  NSXBH_05pr <- project(NSXBH_05, t_max = 100)
+  total_yieldX05 <- TotalYield(NSXBH_05pr)[101]
+  total_yieldsX05 <- c(total_yieldsX05, total_yieldX05) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX05)
+plot(efforts, total_yieldsX05)
+
+total_yieldsX05 <- data.frame(total_yieldsX05)
+efforts <-data.frame(efforts)
+XNSMSSY_05 <- cbind(efforts, total_yieldsX05)
+#MSSY: C=29e-3, YIELD=4.616958e+12
+
+#projection for a=0.5 MSSY unfished
+a=0.5
+NSXBH_05MSSY<- NSst
+NSXBH_05MSSY@gear_params$knife_edge_size <-NSXBH_05MSSY@species_params$w_mat
+NSXBH_05MSSY@species_params$knife_edge_size <-  NSXBH_05MSSY@species_params$w_mat
+gear_params(NSXBH_05MSSY)$gear <- "balanced"
+species_params(NSXBH_05MSSY)$gear <- "balanced"
+NSXBH_05MSSY <- setRateFunction(NSXBH_05MSSY, "FMort", "BalancedHarvest")
+NSXBH_05MSSY <- setFishing(NSXBH_05MSSY, initial_effort = 29e-3) 
+NSXBH_05MSSYst <-projectToSteady(NSXBH_05MSSY)
+NSXBH_05MSSYpr <-project(NSXBH_05MSSY, t_max=100)
+
+TotalYield((NSXBH_05MSSYpr))[101]#4.616958e+12
+
+#later MSSY plots
+NSXMSSYTotalBiomass05 <- TotalBiomass((NSXBH_05MSSYpr))
+NSXMSSYTotalAbundance05 <-TotalAbundance(NSXBH_05MSSYpr)
+NSXMSSYTotalYield05<- TotalYield((NSXBH_05MSSYpr))
+
+```
+
+```{r}
+#finding MSSY for a=0.75 on an initially unfished system 
+a=0.75
+NSXBH_075<- NSst
+gear_params(NSXBH_075)$gear <- "balanced"
+species_params(NSXBH_075)$gear <- "balanced"
+gear_params(NSXBH_075)$knife_edge_size <- NSXBH_075@species_params$w_mat
+species_params(NSXBH_075)$knife_edge_size <- NSXBH_075@species_params$w_mat
+NSXBH_075 <- setRateFunction(NSXBH_075, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=3033e-6,to=3034e-6, by=1e-6) #>3033e-6 doesnt converge 
+
+# Create an empty list to store the results
+total_yieldsX075 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXBH_075 <- setFishing(NSXBH_075, initial_effort =effort)
+  NSXBH_075st <- projectToSteady(NSXBH_075)
+  NSXBH_075pr <- project(NSXBH_075, t_max = 100)
+  total_yieldX075 <- TotalYield(NSXBH_075pr)[101]
+  total_yieldsX075 <- c(total_yieldsX075, total_yieldX075) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX075)
+plot(efforts, total_yieldsX075)
+
+total_yieldsX075 <- data.frame(total_yieldsX075)
+efforts <-data.frame(efforts)
+XNSMSSY_075 <- cbind(efforts, total_yieldsX075)
+#MSSY: c=3033e-6, yield=4.631252e+12
+
+
+#projection for a=0.75 MSSY unfished 
+NSXBH_075MSSY<- NSst
+NSXBH_075MSSY@gear_params$knife_edge_size <-NSXBH_075MSSY@species_params$w_mat
+NSXBH_075MSSY@species_params$knife_edge_size <-  NSXBH_075MSSY@species_params$w_mat
+gear_params(NSXBH_075MSSY)$gear <- "balanced"
+species_params(NSXBH_075MSSY)$gear <- "balanced"
+NSXBH_075MSSY <- setRateFunction(NSXBH_075MSSY, "FMort", "BalancedHarvest")
+NSXBH_075MSSY <- setFishing(NSXBH_075MSSY, initial_effort = 3033e-6) 
+NSXBH_075MSSYst <-projectToSteady(NSXBH_075MSSY)
+NSXBH_075MSSYpr <-project(NSXBH_075MSSY, t_max=100)
+
+TotalYield((NSXBH_075MSSYpr))[101] #4.631252e+12 
+
+#later plots
+NSXMSSYTotalBiomass075 <- TotalBiomass((NSXBH_075MSSYpr))
+NSXMSSYTotalAbundance075 <-TotalAbundance(NSXBH_075MSSYpr)
+NSXMSSYTotalYield075<- TotalYield((NSXBH_075MSSYpr))
+```
+```{r}
+#finding MSSY for a=1 on an initially unfished system 
+a=1
+NSXBH_1<- NSst
+gear_params(NSXBH_1)$gear <- "balanced"
+species_params(NSXBH_1)$gear <- "balanced"
+gear_params(NSXBH_1)$knife_edge_size <- NSXBH_1@species_params$w_mat
+species_params(NSXBH_1)$knife_edge_size <- NSXBH_1@species_params$w_mat
+NSXBH_1 <- setRateFunction(NSXBH_1, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=3.9e-6,to=4e-6, by=0.1e-6) #doesnt converge >3.9
+
+# Create an empty list to store the results
+total_yieldsX1 <- numeric()
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSXBH_1 <- setFishing(NSXBH_1, initial_effort =effort)
+  NSXBH_1st <- projectToSteady(NSXBH_1)
+  NSXBH_1pr <- project(NSXBH_1, t_max = 100)
+  total_yieldX1 <- TotalYield(NSXBH_1pr)[101]
+  total_yieldsX1 <- c(total_yieldsX1, total_yieldX1) 
+}
+
+# Print the total yield values for each run
+print(total_yieldsX1)
+plot(efforts, total_yieldsX1)
+
+total_yieldsX1 <- data.frame(total_yieldsX1)
+efforts <-data.frame(efforts)
+XMSSY_1 <- cbind(efforts, total_yieldsX1)
+#MSSY: c=c=3.9e-6, yield=4.675532e+12
+
+
+#projection for a=1 MSSY unfished 
+NSXBH_1MSSY<- NSst
+NSXBH_1MSSY@gear_params$knife_edge_size <-NSXBH_1MSSY@species_params$w_mat
+NSXBH_1MSSY@species_params$knife_edge_size <-  NSXBH_1MSSY@species_params$w_mat
+gear_params(NSXBH_1MSSY)$gear <- "balanced"
+species_params(NSXBH_1MSSY)$gear <- "balanced"
+NSXBH_1MSSY <- setRateFunction(NSXBH_1MSSY, "FMort", "BalancedHarvest")
+NSXBH_1MSSY <- setFishing(NSXBH_1MSSY, initial_effort = 3.9e-6) 
+NSXBH_1MSSYst <-projectToSteady(NSXBH_1MSSY)
+NSXBH_1MSSYpr <-project(NSXBH_1MSSY, t_max=100)
+TotalYield((NSXBH_1MSSYpr))[101] #4.675532e+12 
+
+#later MSSY plots 
+NSXMSSYTotalBiomass1 <- TotalBiomass((NSXBH_1MSSYpr))
+NSXMSSYTotalAbundance1 <-TotalAbundance(NSXBH_1MSSYpr)
+NSXMSSYTotalYield1 <- TotalYield((NSXBH_1MSSYpr))
+```
+
+```{r}
+#Now finding MSSY for each BH policy with initial conditions fished at KE MSSY
+#finding MSSY for a=0 initially fished kE
+a=0
+NSBH_0<- NSXMSSYKEst
+gear_params(NSBH_0)$gear <- "balanced"
+species_params(NSBH_0)$gear <- "balanced"
+gear_params(NSBH_0)$knife_edge_size <- NSBH_0@species_params$w_mat
+species_params(NSBH_0)$knife_edge_size <- NSBH_0@species_params$w_mat
+NSBH_0 <- setRateFunction(NSBH_0, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=2.725,to=2.726, by=0.001) #>2.725 doesnt converge 
+
+# Create an empty list to store the results
+total_yields0 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSBH_0 <- setFishing(NSBH_0, initial_effort =effort)
+  NSBH_0st <- projectToSteady(NSBH_0)
+  NSBH_0pr <- project(NSBH_0, t_max = 100)
+  total_yield0 <- TotalYield(NSBH_0pr)[101]
+  total_yields0 <- c(total_yields0, total_yield0) 
+}
+
+# Print the total yield values for each run
+print(total_yields0)
+plot(efforts, total_yields0)
+
+total_yields0 <- data.frame(total_yields0)
+efforts <-data.frame(efforts)
+NSMSSY_0 <- cbind(efforts, total_yields0)
+#MSSY: c=2.725, yield=2.561979e+12
+
+#projection for a=0 MSSY KE fished
+#plots pb MSSY (c=2.7)
+NSBH_0MSSY<- NSXMSSYKEst
+NSBH_0MSSY@gear_params$knife_edge_size <-NSBH_0MSSY@species_params$w_mat
+NSBH_0MSSY@species_params$knife_edge_size <-  NSBH_0MSSY@species_params$w_mat
+gear_params(NSBH_0MSSY)$gear <- "balanced"
+species_params(NSBH_0MSSY)$gear <- "balanced"
+NSBH_0MSSY <- setRateFunction(NSBH_0MSSY, "FMort", "BalancedHarvest")
+NSBH_0MSSY <- setFishing(NSBH_0MSSY, initial_effort = 2.725) 
+NSBH_0MSSYst <-projectToSteady(NSBH_0MSSY)
+NSBH_0MSSYpr <-project(NSBH_0MSSY, t_max=100)
+
+TotalYield((NSBH_0MSSYpr))[101]#2.561979e+12 
+
+#later MSSY plots 
+NSMSSYTotalBiomass0 <- TotalBiomass((NSBH_0MSSYpr))
+NSMSSYTotalAbundance0 <-TotalAbundance(NSBH_0MSSYpr)
+NSMSSYTotalYield0 <- TotalYield((NSBH_0MSSYpr))
+```
+
+```{r}
+#finding MSSY for a=0.25 initially fished kE
+a=0.25
+NSBH_025<- NSXMSSYKEst
+gear_params(NSBH_025)$gear <- "balanced"
+species_params(NSBH_025)$gear <- "balanced"
+gear_params(NSBH_025)$knife_edge_size <- NSBH_025@species_params$w_mat
+species_params(NSBH_025)$knife_edge_size <- NSBH_025@species_params$w_mat
+NSBH_025 <- setRateFunction(NSBH_025, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=63.6e-4,to=63.7e-4, by=0.1e-4) #>63.6e-4 doesn't converge 
+
+# Create an empty list to store the results
+total_yields025 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSBH_025 <- setFishing(NSBH_025, initial_effort =effort)
+  NSBH_025st <- projectToSteady(NSBH_025)
+  NSBH_025pr <- project(NSBH_025, t_max = 100)
+  total_yield025 <- TotalYield(NSBH_025pr)[101]
+  total_yields025 <- c(total_yields025, total_yield025)
+}
+
+# Print the total yield values for each run
+print(total_yields025)
+plot(efforts, total_yields025)
+
+total_yieldsRpa025 <- data.frame(total_yields025)
+efforts <-data.frame(efforts)
+NSMSSY_Rpa025 <- cbind(efforts, total_yields025)
+#MSSY: c=63.6e-4, yield=2.816340e+12
+
+#projection for a=0.25 MSSY fished KE
+a=0.25
+NSBH_025MSSY<- NSXMSSYKEst
+NSBH_025MSSY@gear_params$knife_edge_size <-NSBH_025MSSY@species_params$w_mat
+NSBH_025MSSY@species_params$knife_edge_size <-  NSBH_025MSSY@species_params$w_mat
+gear_params(NSBH_025MSSY)$gear <- "balanced"
+species_params(NSBH_025MSSY)$gear <- "balanced"
+NSBH_025MSSY <- setRateFunction(NSBH_025MSSY, "FMort", "BalancedHarvest")
+NSBH_025MSSY <- setFishing(NSBH_025MSSY, initial_effort = 63.6e-4) 
+NSBH_025MSSYst <-projectToSteady(NSBH_025MSSY)
+NSBH_025MSSYpr <-project(NSBH_025MSSY, t_max=100)
+
+TotalYield((NSBH_025MSSYpr))[101]#2.816340e+12
+
+#later MSSY plots
+NSMSSYTotalBiomass025 <- TotalBiomass((NSBH_025MSSYpr))
+NSMSSYTotalAbundance025 <-TotalAbundance(NSBH_025MSSYpr)
+NSMSSYTotalYield025<- TotalYield((NSBH_025MSSYpr))
+```
+
+
+```{r}
+#finding MSSY for a=0.5 initially fished kE
+a=0.5
+NSBH_05<- NSXMSSYKEst
+gear_params(NSBH_05)$gear <- "balanced"
+species_params(NSBH_05)$gear <- "balanced"
+gear_params(NSBH_05)$knife_edge_size <- NSBH_05@species_params$w_mat
+species_params(NSBH_05)$knife_edge_size <- NSBH_05@species_params$w_mat
+NSBH_05 <- setRateFunction(NSBH_05, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=15.75e-6,to=15.76e-6, by=0.01e-6) #> 15.7doesn't converge 
+
+# Create an empty list to store the results
+total_yields05 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSBH_05 <- setFishing(NSBH_05, initial_effort =effort)
+  NSBH_05st <- projectToSteady(NSBH_05)
+  NSBH_05pr <- project(NSBH_05, t_max = 100)
+  total_yield05 <- TotalYield(NSBH_05pr)[101]
+  total_yields05 <- c(total_yields05, total_yield05) 
+}
+
+# Print the total yield values for each run
+print(total_yields05)
+plot(efforts, total_yields05)
+
+total_yields05 <- data.frame(total_yields05)
+efforts <-data.frame(efforts)
+NSMSSY_05 <- cbind(efforts, total_yields05)
+#MSSY: C=15.75e-6, yield=2.985762e+12 
+
+#projection for a=0.5 MSSY KE fished 
+a=0.5
+NSBH_05MSSY<- NSXMSSYKEst
+NSBH_05MSSY@gear_params$knife_edge_size <-NSBH_05MSSY@species_params$w_mat
+NSBH_05MSSY@species_params$knife_edge_size <-  NSBH_05MSSY@species_params$w_mat
+gear_params(NSBH_05MSSY)$gear <- "balanced"
+species_params(NSBH_05MSSY)$gear <- "balanced"
+NSBH_05MSSY <- setRateFunction(NSBH_05MSSY, "FMort", "BalancedHarvest")
+NSBH_05MSSY <- setFishing(NSBH_05MSSY, initial_effort = 15.75e-6) 
+NSBH_05MSSYst <-projectToSteady(NSBH_05MSSY)
+NSBH_05MSSYpr <-project(NSBH_05MSSY, t_max=100)
+
+TotalYield((NSBH_05MSSYpr))[101] #2.985762e+12  
+
+#later MSSY plots
+NSMSSYTotalBiomass05 <- TotalBiomass((NSBH_05MSSYpr))
+NSMSSYTotalAbundance05 <-TotalAbundance(NSBH_05MSSYpr)
+NSMSSYTotalYield05<- TotalYield((NSBH_05MSSYpr))
+```
+
+
+
+```{r}
+#finding MSSY for a=0.75 initially fished kE
+a=0.75
+NSBH_075<- NSXMSSYKEst
+gear_params(NSBH_075)$gear <- "balanced"
+species_params(NSBH_075)$gear <- "balanced"
+gear_params(NSBH_075)$knife_edge_size <- NSBH_075@species_params$w_mat
+species_params(NSBH_075)$knife_edge_size <- NSBH_075@species_params$w_mat
+NSBH_075 <- setRateFunction(NSBH_075, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=40.1e-9,to=40.2e-9, by=0.01e-9) #>40.11 doesnt converge 
+
+# Create an empty list to store the results
+total_yields075 <- numeric()
+
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSBH_075 <- setFishing(NSBH_075, initial_effort =effort)
+  NSBH_075st <- projectToSteady(NSBH_075)
+  NSBH_075pr <- project(NSBH_075, t_max = 100)
+  total_yield075 <- TotalYield(NSBH_075pr)[101]
+  total_yields075 <- c(total_yields075, total_yield075) 
+}
+
+# Print the total yield values for each run
+print(total_yields075)
+plot(efforts, total_yields075)
+
+total_yields075 <- data.frame(total_yields075)
+efforts <-data.frame(efforts)
+MSSY_075 <- cbind(efforts, total_yields075)
+#MSSY: c=40.11e-9, yield=3.063074e+12 
+
+#projection for a=0.75 MSSY KE fished
+a=0.75
+NSBH_075MSSY<- NSXMSSYKEst
+NSBH_075MSSY@gear_params$knife_edge_size <-NSBH_075MSSY@species_params$w_mat
+NSBH_075MSSY@species_params$knife_edge_size <-  NSBH_075MSSY@species_params$w_mat
+gear_params(NSBH_075MSSY)$gear <- "balanced"
+species_params(NSBH_075MSSY)$gear <- "balanced"
+NSBH_075MSSY <- setRateFunction(NSBH_075MSSY, "FMort", "BalancedHarvest")
+NSBH_075MSSY <- setFishing(NSBH_075MSSY, initial_effort = 40.11e-9) 
+NSBH_075MSSYpr <-project(NSBH_075MSSY, t_max=100)
+
+TotalYield((NSBH_075MSSYpr))[101] #3.063074e+12 
+
+#later plots
+NSMSSYTotalBiomass075 <- TotalBiomass((NSBH_075MSSYpr))
+NSMSSYTotalAbundance075 <-TotalAbundance(NSBH_075MSSYpr)
+NSMSSYTotalYield075<- TotalYield((NSBH_075MSSYpr))
+```
+
+```{r}
+#finding MSSY for a=1 initially fished kE
+a=1
+NSBH_1<- NSXMSSYKEst
+gear_params(NSBH_1)$gear <- "balanced"
+species_params(NSBH_1)$gear <- "balanced"
+gear_params(NSBH_1)$knife_edge_size <- NSBH_1@species_params$w_mat
+species_params(NSBH_1)$knife_edge_size <- NSBH_1@species_params$w_mat
+NSBH_1 <- setRateFunction(NSBH_1, "FMort", "BalancedHarvest")
+
+#Testing efforts for BH_pb
+efforts <- seq(from=103.5e-12,to=103.6e-12, by=0.1e-12) #>103.5 doesn't converge 
+
+# Create an empty list to store the results
+total_yields1 <- numeric()
+# Loop over the initial effort values and run the projection
+for (effort in efforts) {
+  NSBH_1 <- setFishing(NSBH_1, initial_effort =effort)
+  NSBH_1st <- projectToSteady(NSBH_1)
+  NSBH_1pr <- project(NSBH_1, t_max = 100)
+  total_yield1 <- TotalYield(NSBH_1pr)[101]
+  total_yields1 <- c(total_yields1, total_yield1) 
+}
+
+# Print the total yield values for each run
+print(total_yields1)
+plot(efforts, total_yields1)
+
+total_yields1 <- data.frame(total_yields1)
+efforts <-data.frame(efforts)
+NSMSSY_1 <- cbind(efforts, total_yields1)
+#MSSY: c=103.5e-12, Yield=3.128320e+12
+
+#projection for a=1 MSSY KE fished 
+NSBH_1MSSY<- NSXMSSYKEst
+NSBH_1MSSY@gear_params$knife_edge_size <-NSBH_1MSSY@species_params$w_mat
+NSBH_1MSSY@species_params$knife_edge_size <-  NSBH_1MSSY@species_params$w_mat
+gear_params(NSBH_1MSSY)$gear <- "balanced"
+species_params(NSBH_1MSSY)$gear <- "balanced"
+NSBH_1MSSY <- setRateFunction(NSBH_1MSSY, "FMort", "BalancedHarvest")
+NSBH_1MSSY <- setFishing(NSBH_1MSSY, initial_effort = 103.5e-12) 
+NSBH_1MSSYst <-projectToSteady(NSBH_1MSSY)
+NSBH_1MSSYpr <-project(NSBH_1MSSY, t_max=100)
+TotalYield((NSBH_1MSSYpr))[101] #3.12832e+12
+
+#later MSSY plots 
+NSMSSYTotalBiomass1 <- TotalBiomass((NSBH_1MSSYpr))
+NSMSSYTotalAbundance1 <-TotalAbundance(NSBH_1MSSYpr)
+NSMSSYTotalYield1 <- TotalYield((NSBH_1MSSYpr))
+```
+
+
+```{r}
+#Comparing yield Dynamics KE fished system Vs non fished system NS
+#For MSSY yield plots i will produce a stacked bar chart at t=100, coloured by species summing to the total yield, y axis=yield, xaxis=a
+matplot(cbind(NSXMSSYTotalYieldKE, NSXMSSYTotalYield0, NSXMSSYTotalYield025, NSXMSSYTotalYield05, NSXMSSYTotalYield075, NSXMSSYTotalYield1),
+log = "xy", type = "l", main = "Total MSSY",
+xlab = "Year", ylab = "Yield",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('KE', 'a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=1)
+
+matplot(cbind(NSXMSSYTotalYieldKE, NSMSSYTotalYield0, NSMSSYTotalYield025, NSMSSYTotalYield05, NSMSSYTotalYield075, NSMSSYTotalYield1),
+log = "xy", type = "l", main = "Total MSSY",
+xlab = "Year", ylab = "Yield",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+#legend(x='topright',legend = c('KE', 'a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=4, cex=1) 
+```
+```{r}
+#FOR MSSY total abundance and biomass plots i will just inlcude a barchart of the final step
+#Comparing Biomasss Dynamics KE fished system Vs non fished system NS
+matplot(cbind(NSTotalBiomass, NSXMSSYTotalBiomassKE, NSXMSSYTotalBiomass0, NSXMSSYTotalBiomass025, NSXMSSYTotalBiomass05, NSXMSSYTotalBiomass075, NSXMSSYTotalBiomass1),
+log = "xy", type = "l", main = "MSSY Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1",  col = c(8,1,7,3,4,5,2), lty=c(4,2,1,1,1,1,2),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('unfished','a=0','pb','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(8,1,7,3,4,5,2), lty=c(4,2,1,1,1,1,2), lwd=3, cex=1)
+
+
+#biomass plot
+matplot(cbind(NSXMSSYTotalBiomassKE, NSMSSYTotalBiomass0, NSMSSYTotalBiomass025, NSMSSYTotalBiomass05, NSMSSYTotalBiomass075, NSMSSYTotalBiomass1),
+log = "xy", type = "l", main = "MSSY Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1",  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomright',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=0.68) +ylim(2e12, 7e12)
+```
+
+```{r}
+#Comparing Abundance Dynamics KE fished system Vs non fished system NS
+matplot(cbind(NSTotalAbundance, NSXMSSYTotalAbundanceKE, NSXMSSYTotalAbundance0, NSXMSSYTotalAbundance025, NSXMSSYTotalAbundance05, NSXMSSYTotalAbundance075, NSXMSSYTotalAbundance1),
+log = "xy", type = "l", main = "MSSY Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(8,1,7,3,4,5,2), lty=c(4,2,1,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomleft',legend = c('unfished','KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'),  col = c(8,1,7,3,4,5,2), lty=c(4,2,1,2,2,1,1), lwd=3, cex=0.68)
+
+matplot(cbind(NSXMSSYTotalAbundanceKE, NSMSSYTotalAbundance0, NSMSSYTotalAbundance025, NSMSSYTotalAbundance05, NSMSSYTotalAbundance075, NSMSSYTotalAbundance1),
+log = "xy", type = "l", main = "MSSY Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1), lwd=3, cex=0.75)
+
+```
+
+```{r}
+#Now we are analyzing fishing efforts which result in the same yield regardless of policy to compare policies rather than system initial conditions in a NS model
+#we compare policies after KE fishing as this is the most realistic
+#finding the initial state for all other policies 
+NSe12KE <- NSst
+gear_params(NSe12KE)$gear <- "knife edge"
+species_params(NSe12KE)$gear <- "knife edge"
+gear_params(NSe12KE)$knife_edge_size <- species_params(NSe12KE)$w_mat
+species_params(NSe12KE)$knife_edge_size <- species_params(NSe12KE)$w_mat
+NSe12KEst <- projectToSteady(NSe12KE, effort=0.1553028)
+NSe12KEpr <- project(NSe12KEst, effort=0.1553028, t_max=100)
+TotalYield(NSe12KEpr)[101] #1e+12 
+
+#plots for later 
+NSe12TotalYieldKE<- TotalYield(NSe12KEpr)
+NSe12TotalBiomassKE <- TotalBiomass((NSe12KEpr))
+NSe12TotalAbundanceKE <-TotalAbundance(NSe12KEpr)
+
+#SSB
+NSe12ssbKE <- melt(getSSB(NSe12KEpr))
+```
+
+
+```{r}
+a=0
+NSe12BH_0<- NSe12KEst
+gear_params(NSe12BH_0)$gear <- "balanced"
+species_params(NSe12BH_0)$gear <- "balanced"
+gear_params(NSe12BH_0)$knife_edge_size <- NSe12BH_0@species_params$w_mat
+species_params(NSe12BH_0)$knife_edge_size <- NSe12BH_0@species_params$w_mat
+NSe12BH_0 <- setFishing(NSe12BH_0, initial_effort =0.58919) 
+NSe12BH_0 <- setRateFunction(NSe12BH_0, "FMort", "BalancedHarvest")
+NSe12BH_0st <-projectToSteady(NSe12BH_0)
+
+NSe12BH_0pr <- project(NSe12BH_0, t_max=100)
+TotalYield(NSe12BH_0pr)[101] #1.000033e+12 
+
+#FOR LATER PLOTS
+NSe12TotalYield0 <- TotalYield((NSe12BH_0pr))
+NSe12TotalBiomass0 <- TotalBiomass((NSe12BH_0pr))
+NSe12TotalAbundance0 <-TotalAbundance(NSe12BH_0pr)
+
+#SSB
+NSe12ssb0 <- melt(getSSB(NSe12BH_0pr))
+```
+
+
+
+```{r}
+a<-0.25
+NSe12BH_025<-NSe12KEst
+gear_params(NSe12BH_025)$gear <- "balanced"
+species_params(NSe12BH_025)$gear <- "balanced"
+gear_params(NSe12BH_025)$knife_edge_size <- NSe12BH_025@species_params$w_mat
+species_params(NSe12BH_025)$knife_edge_size <- NSe12BH_025@species_params$w_mat
+NSe12BH_025 <- setFishing(NSe12BH_025, initial_effort =7.746e-4) 
+NSe12BH_025<- setRateFunction(NSe12BH_025, "FMort", "BalancedHarvest")
+NSe12BH_025st <-projectToSteady(NSe12BH_025)
+
+NSe12BH_025pr <- project(NSe12BH_025, t_max=100)
+TotalYield(NSe12BH_025pr)[101]  #1.00026e+12 
+
+#FOR LATER PLOTS
+NSe12TotalYield025 <- TotalYield((NSe12BH_025pr))
+NSe12TotalBiomass025 <- TotalBiomass((NSe12BH_025pr))
+NSe12TotalAbundance025 <-TotalAbundance(NSe12BH_025pr)
+
+#SSB
+NSe12ssb025 <- melt(getSSB(NSe12BH_025pr))
+```
+
+```{r}
+a<-0.5
+NSe12BH_05<-NSe12KEst
+gear_params(NSe12BH_05)$gear <- "balanced"
+species_params(NSe12BH_05)$gear <- "balanced"
+gear_params(NSe12BH_05)$knife_edge_size <- NSe12BH_05@species_params$w_mat
+species_params(NSe12BH_05)$knife_edge_size <- NSe12BH_05@species_params$w_mat
+NSe12BH_05 <- setFishing(NSe12BH_05, initial_effort =9.688e-7) 
+NSe12BH_05<- setRateFunction(NSe12BH_05, "FMort", "BalancedHarvest")
+NSe12BH_05st <-projectToSteady(NSe12BH_05)
+
+NSe12BH_05pr <- project(NSe12BH_05, t_max=100)
+TotalYield(NSe12BH_05pr)[101] #1.000405e+12
+
+#FOR LATER PLOTS
+NSe12TotalYield05 <- TotalYield((NSe12BH_05pr))
+NSe12TotalBiomass05 <- TotalBiomass((NSe12BH_05pr))
+NSe12TotalAbundance05 <-TotalAbundance(NSe12BH_05pr)
+
+#SSB
+NSe12ssb05 <- melt(getSSB(NSe12BH_05pr))
+```
+
+```{r}
+a<-0.75
+NSe12BH_075<- NSe12KEst
+gear_params(NSe12BH_075)$gear <- "balanced"
+species_params(NSe12BH_075)$gear <- "balanced"
+gear_params(NSe12BH_075)$knife_edge_size <- NSe12BH_075@species_params$w_mat
+species_params(NSe12BH_075)$knife_edge_size <- NSe12BH_075@species_params$w_mat
+NSe12BH_075 <- setFishing(NSe12BH_075, initial_effort =1.167e-9) 
+NSe12BH_075<- setRateFunction(NSe12BH_075, "FMort", "BalancedHarvest")
+NSe12BH_075st <-projectToSteady(NSe12BH_075)
+
+NSe12BH_075pr <- project(NSe12BH_075, t_max=100)
+TotalYield(NSe12BH_075pr)[101] #1.000049e+12 
+
+#FOR LATER PLOTS 
+NSe12TotalYield075 <- TotalYield((NSe12BH_075pr))
+NSe12TotalBiomass075 <- TotalBiomass((NSe12BH_075pr))
+NSe12TotalAbundance075 <-TotalAbundance(NSe12BH_075pr)
+
+#SSB
+NSe12ssb075 <- melt(getSSB(NSe12BH_075pr))
+```
+
+```{r}
+a=1
+NSe12BH_1<- NSe12KEst
+gear_params(NSe12BH_1)$gear <- "balanced"
+species_params(NSe12BH_1)$gear <- "balanced"
+gear_params(NSe12BH_1)$knife_edge_size <- NSe12BH_1@species_params$w_mat
+species_params(NSe12BH_1)$knife_edge_size <- NSe12BH_1@species_params$w_mat
+NSe12BH_1 <- setFishing(NSe12BH_1, initial_effort =1.368602e-12)
+NSe12BH_1 <- setRateFunction(NSe12BH_1, "FMort", "BalancedHarvest")
+NSe12BH_1st <-projectToSteady(NSe12BH_1)
+
+NSe12BH_1pr <- project(NSe12BH_1, t_max=100)
+TotalYield(NSe12BH_1pr)[101] #1.00001e+12 
+
+#FOR LATER PLOTS 
+NSe12TotalYield1 <- TotalYield((NSe12BH_1pr))
+NSe12TotalBiomass1 <- TotalBiomass((NSe12BH_1pr))
+NSe12TotalAbundance1 <-TotalAbundance(NSe12BH_1pr)
+
+#SSB
+NSe12ssb1 <- melt(getSSB(NSe12BH_1pr))
+```
+
+```{r}
+#NSe12 yield plot
+matplot(cbind(NSe12TotalYieldKE, NSe12TotalYield0, NSe12TotalYield025, NSe12TotalYield05, NSe12TotalYield075, NSe12TotalYield1),
+log = "xy", type = "l", main = "Total Yield",
+xlab = "Year", ylab = "Yield", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='topright',legend = c('KE', 'a=1','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=1)
+```
+```{r}
+#biomass plot
+matplot(cbind(NSe12TotalBiomassKE, NSe12TotalBiomass0, NSe12TotalBiomass025, NSe12TotalBiomass05, NSe12TotalBiomass075, NSe12TotalBiomass1),
+log = "xy", type = "l", main = "Total Biomass",
+xlab = "Year", ylab = "Biomass /gm^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+#legend(x='topleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=0.68)
+```
+
+```{r}
+matplot(cbind(NSe12TotalAbundanceKE, NSe12TotalAbundance0, NSe12TotalAbundance025, NSe12TotalAbundance05, NSe12TotalAbundance075, NSe12TotalAbundance1),
+log = "xy", type = "l", main = "Total Abunance",
+xlab = "Year", ylab = "Abundance /m^-3year^-1", col = c(1,7,3,4,5,2), lty=c(4,1,2,2,2,1),lwd = 3, bty = "l",cex.axis=1.2,cex.lab=1.2)
+legend(x='bottomleft',legend = c('KE','a=0','a=0.25', 'a=0.5','a=0.75', 'a=1'), lty = c(4,1,2,2,2,1), col = c(1,7,3,4,5,2), lwd=3, cex=0.75)
+```
+```{r}
+#plot spectra relative a=0 & a=1
+plotSpectraRelative(NSe12KEpr,NSe12BH_0pr)
+plotSpectraRelative(NSe12KEpr,NSe12BH_1pr)
+```
+```{r}
+#RELATIVE SSB FOR NSe12
+#sorting data a=0
+NSSSBstandard0 <- merge(NSe12ssbKE[,c('time', 'sp','value')], NSe12ssb0[,c('time', 'sp','value')], by =c('sp', 'time'))
+NSSSBstandard0$difference <- ((NSSSBstandard0$value.y - NSSSBstandard0$value.x)/NSSSBstandard0$value.x)*100
+NSSSBstandard0<- subset(NSSSBstandard0, select= -c(value.x, value.y))
+
+#sorting data a=1
+NSSSBstandard1 <- merge(NSe12ssbKE[,c('time', 'sp','value')], NSe12ssb1[,c('time', 'sp','value')], by =c('sp', 'time'))
+NSSSBstandard1$difference <- ((NSSSBstandard1$value.y - NSSSBstandard1$value.x)/NSSSBstandard1$value.x)*100
+NSSSBstandard1 <- subset(NSSSBstandard1, select= -c(value.x, value.y))
+
+#sorting data a=0.25
+NSSSBstandard025 <- merge(NSe12ssbKE[,c('time', 'sp','value')], NSe12ssb025[,c('time', 'sp','value')], by =c('sp', 'time'))
+NSSSBstandard025$difference <- ((NSSSBstandard025$value.y - NSSSBstandard025$value.x)/NSSSBstandard025$value.x)*100
+NSSSBstandard025 <- subset(NSSSBstandard025, select= -c(value.x, value.y))
+
+#sorting data a=0.5
+NSSSBstandard05<- merge(NSe12ssbKE[,c('time', 'sp','value')], NSe12ssb05[,c('time', 'sp','value')], by =c('sp', 'time'))
+NSSSBstandard05$difference <- ((NSSSBstandard05$value.y - NSSSBstandard05$value.x)/NSSSBstandard05$value.x)*100
+NSSSBstandard05 <- subset(NSSSBstandard05, select= -c(value.x, value.y))
+
+#sorting data a=0.75
+NSSSBstandard075 <- merge(NSe12ssbKE[,c('time', 'sp','value')], NSe12ssb075[,c('time', 'sp','value')], by =c('sp', 'time'))
+NSSSBstandard075$difference <- ((NSSSBstandard075$value.y - NSSSBstandard075$value.x)/NSSSBstandard075$value.x)*100
+NSSSBstandard075 <- subset(NSSSBstandard075, select= -c(value.x, value.y))
+
+abc <- rbind(cbind(NSSSBstandard0, scenario = 'a=0'), cbind(NSSSBstandard025, scenario = 'a=0.25'), cbind(NSSSBstandard05, scenario = 'a=0.50'), cbind(NSSSBstandard075, scenario = 'a=0.75'),   cbind(NSSSBstandard1, scenario= 'a=1'))
+
+colours <-c('a=1'='red', 'a=0.25'='green', 'a=0.50'='#7fcdbb', 'a=0.75'='blue', 'a=0'='orange')
+
+ggplot(data = abc, aes(x = time, y = difference, color = scenario)) +
+     geom_line() +
+     facet_wrap(~ sp, scales = "free_y") + scale_color_manual(values = colours)+geom_hline(yintercept = 0, linetype="dashed") + ylab('SSB difference/ %')
+
+```
+
