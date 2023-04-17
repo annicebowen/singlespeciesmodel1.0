@@ -1,6 +1,7 @@
 library(mizer)
 library(ggplot2)
 library(cowplot)
+library(mizerExperimental)
 
 #Defining functions 
 # define Balanced Harvesting policy -we will investigate a=0,0.25,0.50,0.75,1
@@ -24,7 +25,6 @@ TotalBiomass <- function(sim) {
   b_total <- rowSums(b)
   return(b_total)
 }
-
 
 #define total abundance 
 TotalAbundance <- function(sim) { 
@@ -354,6 +354,7 @@ TBMSSYdf <- data.frame(policy=rep(c("0", "0.25", "0.5", "0.75", "1", "KE"),2), H
                                     TBMSSYTotalAbundance1[101], TBXMSSYTotalAbundanceKE[101], TBXMSSYTotalAbundance0[101], TBXMSSYTotalAbundance025[101], 
                                     TBXMSSYTotalAbundance05[101],TBXMSSYTotalAbundance075[101], TBXMSSYTotalAbundance1[101], TBXMSSYTotalAbundanceKE[101]))
 
+
 TBMSSYYield <- ggplot(TBMSSYdf, aes(x=policy, y=Yield, fill=Historically)) + 
   geom_bar(stat="identity", position=position_dodge()) +coord_cartesian(ylim=c(0.018,0.022))+ labs(x=NULL, y='Yield/ g^3year^-1') +theme(legend.position="none")
 
@@ -502,40 +503,32 @@ TB01YieldKEplot <- ggplot(TB01YieldKEdf, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = "Yield /gm^3year^-1") +scale_y_log10(limits = c(0.3e-4, 5e-3)) 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12))+ylim(0, 0.004)
 
 TB01Yield0plot<- ggplot(TB01Yield0df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = NULL) +scale_y_log10(limits = c(0.3e-4, 5e-3)) 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12))+ylim(0, 0.004)
 
 TB01Yield025plot<-ggplot(TB01Yield025df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = NULL) +scale_y_log10(limits=c(0.3e-4, 5e-3))
 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12))+ylim(0, 0.004)
-
 TB01Yield05plot<- ggplot(TB01Yield05df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = 'Yield/gm^3year^-1') +scale_y_log10(limits=c(0.3e-4, 5e-3))
 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12))+ylim(0, 0.005)
 
 TB01Yield075plot<- ggplot(TB01Yield075df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = NULL) + scale_y_log10(limits =c(0.3e-4, 5e-3))
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0, 0.005) 
 
 TB01Yield1plot<- ggplot(TB01Yield1df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = NULL) + scale_y_log10(limits = c(0.3e-4, 5e-3))
-
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0, 0.005) 
 
 TB01RelativeBiomass0df <- data.frame(RelativeBiomass=TB01Biomass0[101,]/TB01BiomassKE[101,], species=1:12)
 TB01RelativeBiomass025df <- data.frame(RelativeBiomass=TB01Biomass025[101,]/TB01BiomassKE[101,], species=1:12)
@@ -579,6 +572,10 @@ TB01Abundance1plot<- ggplot(TB01RelativeAbundance1df, aes(x = factor(species))) 
 plot_grid(TB01Biomass0plot, TB01Biomass025plot, TB01Biomass05plot, TB01Biomass075plot, TB01Biomass1plot, TB01Abundance0plot, TB01Abundance025plot, TB01Abundance05plot, TB01Abundance075plot, TB01Abundance1plot, ncol = 5)
 plot_grid(TB01YieldKEplot, TB01Yield0plot, TB01Yield025plot, TB01Yield05plot, TB01Yield075plot, TB01Yield1plot,ncol=3)
 
+#size size structure within species 
+plotSpectra(TB01KEpr, power=0)
+plotSpectraRelative(TB01KEpr,TB01BH_0pr)
+plotSpectraRelative(TB01KEpr,TB01BH_1pr)
 
 #All analysis after this point is on the North Sea model 
 #setting up the model 
@@ -1031,42 +1028,31 @@ NSe12YieldKEplot <- ggplot(NSe12YieldKEdf, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = 'Yield/gyear^-1') +scale_y_log10(limits=c(1e+7,3e+12))
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0,1e+12) 
 
 NSe12Yield0plot<- ggplot(NSe12Yield0df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = NULL) +scale_y_log10(limits=c(1e+7,3e+12))
 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0,2.1e+12)
-
 NSe12Yield025plot<-ggplot(NSe12Yield025df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = NULL, y = NULL) +scale_y_log10(limits=c(1e+7,3e+12))
-  
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0,2.1e+12)
 
 NSe12Yield05plot<- ggplot(NSe12Yield05df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = 'Yield/gyear^-1') +scale_y_log10(limits=c(1e+7,3e+12))
-  
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0,2.1e+12)
 
 NSe12Yield075plot<- ggplot(NSe12Yield075df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = NULL) +scale_y_log10(limits=c(1e+7,3e+12))
 
-#scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) + ylim(0,2.1e+12)
-
 NSe12Yield1plot<- ggplot(NSe12Yield1df, aes(x = factor(species))) +
   geom_point(aes(y = yield0), shape = 21, fill = "white", size = 2) +
   geom_point(aes(y = yield100), shape = 19, size = 2) +
   labs(x = 'Species', y = NULL) +scale_y_log10(limits=c(1e+7,3e+12))
-
-  #scale_x_discrete(breaks = 1:12, labels = paste0(1:12)) +ylim(0,2.1e+12)
 
 NSe12RelativeBiomass0df <- data.frame(RelativeBiomass=NSe12Biomass0[101,]/NSe12BiomassKE[101,], species=1:12)
 NSe12RelativeBiomass025df <- data.frame(RelativeBiomass=NSe12Biomass025[101,]/NSe12BiomassKE[101,], species=1:12)
@@ -1099,5 +1085,7 @@ NSe12Abundance1plot<- ggplot(NSe12RelativeAbundance1df, aes(x = factor(species))
 plot_grid(NSe12YieldKEplot, NSe12Yield0plot, NSe12Yield025plot, NSe12Yield05plot, NSe12Yield075plot, NSe12Yield1plot, ncol= 3)
 plot_grid(NSe12Biomass0plot, NSe12Biomass025plot, NSe12Biomass05plot, NSe12Biomass075plot, NSe12Biomass1plot, NSe12Abundance0plot, NSe12Abundance025plot, NSe12Abundance05plot, NSe12Abundance075plot, NSe12Abundance1plot, ncol = 3)
 
-
-
+#size size structure within species 
+plotSpectra(NSe12KEpr, power=0)
+plotSpectraRelative(NSe12KEpr,NSe12BH_0pr) +ylim(c(-1,1))
+plotSpectraRelative(NSe12KEpr,NSe12BH_1pr) +ylim(c(-1,1))
